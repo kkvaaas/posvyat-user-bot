@@ -1,26 +1,35 @@
 import gspread
-json_file = 'bot_auth.json'
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+json_file = os.getenv("GSHEET_CREDS_PATH")
+sheet_name = os.getenv("GSHEET_NAME")
 gc = gspread.service_account(filename=json_file)
-sh = gc.open('second')
+sh = gc.open(sheet_name)
 
 name_tg_cell = 'TG'
 
 
-def mailing(table_name, row, value, mess):
-    users = []
-    warn = []
-    if table_name and row and value and mess:
-        worksheet = sh.worksheet(table_name)
-        a = worksheet.get_all_records()
-        for cell in a:
-            if value == str(cell[row]):
-                user_tag = cell[name_tg_cell].replace('@', '')
-                user_id = get_user_id(user_tag)
-                if user_id:
-                    users.append((user_tag, user_id))
-                else:
-                    warn.append((user_tag, user_id))
-    return users, warn
+gc = gspread.service_account(filename='bot_auth.json')
+sh = gc.open('hsebot')  # имя вашей таблицы
+worksheet = sh.worksheet('second')  # нужный лист
+
+
+def find_user_in_sheet(user_tag: str):
+    """
+    Ищем пользователя по Telegram username (user_tag с @)
+    Возвращаем словарь с данными (Name, Surname, Middle Name и т.п.) или None.
+    """
+    all_records = worksheet.get_all_records()
+    print("123")
+    for record in all_records:
+        tg_username = record.get('TG', '').strip()
+        if tg_username == user_tag:
+            return record
+    return None
+
 
 
 def get_data(table_name: str):
@@ -28,67 +37,48 @@ def get_data(table_name: str):
     return worksheet.get_all_records()
 
 
-def get_registration(a):
-    users = []
-    with open('reg_list.txt') as file:
-        reg_users = file.read().split('\n')
-    for cell in a:
-        user_tag = cell[name_tg_cell].replace('@', '')
-        if user_tag not in reg_users:
-            users.append(user_tag)
+def get_registration(data):
+    return get_new_users(data, 'reg_list.txt')
 
+
+def get_transfer(data):
+    return get_new_users(data, 'transfer_list.txt')
+
+
+def get_living(data):
+    return get_new_users(data, 'living_list.txt')
+
+
+def get_new_users(data, filename):
+    with open(f'data/{filename}', 'r') as f:
+        known = set(f.read().splitlines())
+    users = []
+    for cell in data:
+        user_tag = cell.get(name_tg_cell, '').replace('@', '')
+        if user_tag and user_tag not in known:
+            users.append(user_tag)
     return users
 
-def get_transfer(a):
-    users = []
-    with open('transfer_list.txt') as file:
-        reg_users = file.read().split('\n')
-    for cell in a:
-        user_tag = cell[name_tg_cell].replace('@', '')
-        if user_tag not in reg_users:
-            users.append(user_tag)
-
-    return users
-
-
-def get_living(a):
-    users = []
-    with open('living_list.txt') as file:
-        reg_users = file.read().split('\n')
-    for cell in a:
-        user_tag = cell[name_tg_cell].replace('@', '')
-        if user_tag not in reg_users:
-            users.append(user_tag)
-
-    return users
 
 def get_user_id(user_tag: str):
-    user_id = 0
-    with open('users.txt') as f:
-        data = f.read().split('\n')
-        for i in data:
+    with open('data/users.txt', 'r') as f:
+        for line in f:
             try:
-                tag, tag_id = i.split()
-                tag_id = int(tag_id)
+                tag, uid = line.strip().split()
                 if tag == user_tag:
-                    user_id = tag_id
-                    break
+                    return int(uid)
             except:
-                break
-    return user_id
+                continue
+    return 0
 
 
 def get_user_tag(user_id: int):
-    user_name = ''
-    with open('users.txt') as f:
-        data = f.read().split('\n')
-        for i in data:
+    with open('data/users.txt', 'r') as f:
+        for line in f:
             try:
-                tag, tag_id = i.split()
-                tag_id = int(tag_id)
-                if tag_id == user_id:
-                    user_name = tag
-                    break
+                tag, uid = line.strip().split()
+                if int(uid) == user_id:
+                    return tag
             except:
-                break
-    return user_name
+                continue
+    return ''

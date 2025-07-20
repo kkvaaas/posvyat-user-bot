@@ -1,162 +1,89 @@
-import threading
-import time
-import telebot
-from table_parser import mailing, get_user_id, get_user_tag, get_registration, get_data, get_transfer, get_living
 import os
+import telebot
+import asyncio
+from telebot.async_telebot import AsyncTeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from table_parser import find_user_in_sheet
 from dotenv import load_dotenv
 
-
-load_dotenv()  # загружает переменные из .env
-
+load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
-bot = telebot.TeleBot(TOKEN)
-admin_ids = [550509099, 1628109575, 766749758, 2086166118, 1072196201, 847536529]
-faq_id = -4570130952
+bot = AsyncTeleBot(TOKEN)
+admin_ids = [1232239269]
 
-hi_message = 'Привет 💥\nЭто бот Посвящения в студенты 2024\nЗдесь ты будешь получать важную информацию о нашем мероприятии 🤠\nДо встречи в Клондайке🌵\nЧтоб задать вопрос напиши /help'
-reg_message = 'Поздравляю! \nТы успешно прошел(а) регистрацию на самое незабываемое событие студенчества 🏜'
-transfer_message = 'По коням 🐴\nТы успешно прошел(а) регистрацию на трансфер.'
-living_message = 'Выспаться сможешь 🛌 \nТы зарегистрировался(ась). На Посвяте хорошо отдохнешь после захватывающей программы.'
-# money_message = 'Оплата прошла успешно'
-
-
-def add_user(message):
-    user_id, user_tag = message.from_user.id, message.from_user.username
-    if get_user_id(user_tag) == 0:
-        with open('users.txt', 'a') as file:
-            file.writelines(str(user_tag) + ' ' + str(user_id) + '\n')
+# Заранее загружаем user_id из файла в память
+users_dict = {}
+if os.path.exists('data/users.txt'):
+    with open('data/users.txt', 'r') as file:
+        for line in file:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                users_dict[parts[0]] = int(parts[1])
 
 
-@bot.message_handler(content_types=['text'])
-def get_text_messages(message):
-    # print(message)
-    if message.chat.type == 'private':
-        if message.text[0] == '/':
-            if message.text == '/start':
-                bot.send_message(message.from_user.id, hi_message)
-                add_user(message)
-            elif message.text == '/help':
-                bot.send_message(message.from_user.id, "Задай свой вопрос (для отмены напиши назад)")
-                bot.register_next_step_handler(message, get_help)
-            else:
-                a = message.text.strip().split()
-                if a[0] == '/send_message' and message.from_user.id in admin_ids:
-                    bot.send_message(message.from_user.id, 'введите название таблицы(для отмены рассылки напишите стоп)')
-                    bot.register_next_step_handler(message, get_table)
-                else:
-                    bot.send_message(message.from_user.id, 'Неизвестная команда')
-
-        else:
-            bot.send_message(message.from_user.id, "Для помощи напишите /help")
+def save_user(user_tag, user_id):
+    if user_tag not in users_dict:
+        users_dict[user_tag] = user_id
+        with open('data/users.txt', 'a') as file:
+            file.write(f"{user_tag} {user_id}\n")
 
 
-def get_table(message):
-    table_name = message.text
-    bot.send_message(message.from_user.id, "введите название поля")
-    if message.text.lower().strip() != 'стоп':
-        bot.register_next_step_handler(message, get_row, table_name)
-    else:
-        bot.send_message(message.from_user.id, 'диалог прерван')
+def main_menu_keyboard():
+    keyboard = InlineKeyboardMarkup()
+    keyboard.row_width = 2
+    keyboard.add(
+        InlineKeyboardButton("Регистрация", callback_data="register"),
+        InlineKeyboardButton("Задать вопрос", callback_data="help")
+    )
+    keyboard.add(
+        InlineKeyboardButton("FAQ", url="https://t.me/тут url посвята")
+    )
+    return keyboard
+
+
+@bot.message_handler(commands=['start'])
+async def start_handler(message):
+    user_id = message.from_user.id
+    user_tag = message.from_user.username
+
+    if not user_tag:
+        await bot.send_message(user_id, "Пожалуйста, установи username в Telegram, чтобы использовать бота.")
         return
 
+    save_user(user_tag, user_id)
 
-def get_row(message, table_name):
-    row_name = message.text
-    bot.send_message(message.from_user.id, "введите значение поля")
-    if message.text.lower().strip() != 'стоп':
-        bot.register_next_step_handler(message, get_value, table_name, row_name)
+    user_data = find_user_in_sheet(user_tag)
+    if user_data is None:
+        await bot.send_message(user_id,
+            "Привет! Похоже, ты ещё не зарегистрировался(ась).\n"
+            "Пожалуйста, пройди регистрацию на сайте: https://example.com/register\n"
+            "После регистрации вернись сюда и нажми /start снова."
+        )
     else:
-        bot.send_message(message.from_user.id, 'диалог прерван')
-        return
+        name = user_data.get('Имя', '')
+        surname = user_data.get('Фамилия', '')
+        await bot.send_message(user_id, f"Привет, {name} {surname}!\nРады видеть тебя! Если нужна помощь, напиши /help.")
 
 
-def get_value(message, table_name, row_name):
-    row_value = message.text
-    bot.send_message(message.from_user.id, "введите отправляемый текст")
-    if message.text.lower().strip() != 'стоп':
-        bot.register_next_step_handler(message, start_mailing, table_name, row_name, row_value)
-    else:
-        bot.send_message(message.from_user.id, 'диалог прерван')
-        return
+# Callback обработка
+@bot.callback_query_handler(func=lambda call: True)
+async def callback_handler(call):
+    if call.data == "register":
+        await bot.send_message(call.message.chat.id, "Для регистрации напиши /start и следуй инструкциям.")
+    elif call.data == "help":
+        await bot.send_message(call.message.chat.id, "Напиши свой вопрос сюда:")
+        bot.register_next_step_handler(call.message, get_help)
 
 
-def start_mailing(message, table_name, row_name, value):
-    txt = message.text
-    if table_name and row_name and value and txt:
-        try:
-            users, warn = mailing(table_name, row_name, value, txt)
-        except:
-            bot.send_message(message.from_user.id, 'Ошибка рассылки')
-        else:
-            for user in users:
-                user_tag, user_id = user
-                try:
-                    bot.send_message(user_id, txt)
-                except:
-                    warn.append((user_tag, user_id))
-            if len(users) != 0:
-                bot.send_message(message.from_user.id, 'Рассылка совершена')
-            else:
-                bot.send_message(message.from_user.id, 'Рассылка никому не дошла')
-            unreg_mess = ''
-            for i in warn:
-                unreg_mess += f'@{i[0]}\n'
-            bot.send_message(message.from_user.id, 'Не зашли в бота(или неправильно указали тгшку): \n' + unreg_mess)
-    else:
-        bot.send_message(message.from_user.id, 'Ошибка рассылки')
+# Пример функции вопроса
+async def get_help(message):
+    await bot.send_message(message.chat.id, "Спасибо за вопрос. В скором времени с тобой свяжутся.")
 
 
-def get_help(message):
-    if message.text.lower().strip() != 'назад':
-        user_tag = get_user_tag(message.from_user.id)
-        if user_tag:
-            bot.send_message(faq_id, f'message from user @{get_user_tag(message.from_user.id)}\n' + message.text)
-            bot.send_message(message.from_user.id, 'Спасибо за вопрос жди ответа')
-        else:
-            bot.send_message(message.from_user.id, 'Произошла ошибка, напиши еще раз')
-    else:
-        bot.send_message(message.from_user.id, 'Диалог прерван')
-        return
+# Основной асинхронный запуск
+async def main():
+    await bot.polling(non_stop=True)
 
-
-def send_periodic_messages():
-    while True:
-        data = get_data('Registration')
-        users_tag = get_registration(data)
-        for user_tag in users_tag:
-            try:
-                bot.send_message(get_user_id(user_tag), reg_message)
-            except:
-                pass
-            else:
-                with open('reg_list.txt', 'a') as file:
-                    file.writelines(str(user_tag) + '\n')
-
-        data = get_data('Transfer')
-        users_tag = get_transfer(data)
-        for user_tag in users_tag:
-            try:
-                bot.send_message(get_user_id(user_tag), transfer_message)
-            except:
-                pass
-            else:
-                with open('transfer_list.txt', 'a') as file:
-                    file.writelines(str(user_tag) + '\n')
-
-        data = get_data('Rasselenie')
-        users_tag = get_living(data)
-        for user_tag in users_tag:
-            try:
-                bot.send_message(get_user_id(user_tag), living_message)
-            except:
-                pass
-            else:
-                with open('living_list.txt', 'a') as file:
-                    file.writelines(str(user_tag) + '\n')
-        time.sleep(300)
-
-
-thread = threading.Thread(target=send_periodic_messages)
-thread.start()
-bot.polling(none_stop=True, interval=0)
+if __name__ == "__main__":
+    asyncio.run(main())
