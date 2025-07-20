@@ -1,0 +1,4 @@
+bot_auth.json
+.env
+.idea/*
+__pycache__/*
